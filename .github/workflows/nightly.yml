@@ -119,17 +119,26 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import plistlib
+          import zipfile
           from pathlib import Path
+
+          ipa_path = Path("build/Trop.ipa")
+          with zipfile.ZipFile(ipa_path, "r") as z:
+              with z.open("Payload/Trop.app/Info.plist") as f:
+                  info = plistlib.load(f)
+
+          actual_version = str(info.get("CFBundleShortVersionString", "0.0.4"))
+          actual_build = str(info.get("CFBundleVersion", os.environ["BUILD_NUMBER"]))
 
           path = Path("altstore.json")
           source = json.loads(path.read_text())
           app = source["apps"][0]
-          current_ver = app.get("versions", [{}])[0].get("version", "0.0.4")
           entry = {
-              "version": current_ver,
-              "buildVersion": str(os.environ["BUILD_NUMBER"]),
+              "version": actual_version,
+              "buildVersion": actual_build,
               "date": os.environ["DATE"],
-              "localizedDescription": f"Nightly build #{os.environ['BUILD_NUMBER']} from main branch",
+              "localizedDescription": f"Nightly build #{actual_build} from main branch",
               "downloadURL": os.environ["DOWNLOAD_URL"],
               "size": int(os.environ["SIZE"]),
               "minOSVersion": "26.0",
