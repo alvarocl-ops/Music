@@ -27,10 +27,10 @@
         {
           "version": "0.0.4",
           "buildVersion": "1",
-          "date": "2026-11-09T00:00:00Z",
-          "localizedDescription": "Nightly / latest build compiled via GitHub Actions.",
+          "date": "2026-11-09T15:51:25Z",
+          "localizedDescription": "Nightly build #1 from main branch",
           "downloadURL": "https://github.com/alvarocl-ops/Music/releases/download/nightly/Trop.ipa",
-          "size": 47611625,
+          "size": 47614699,
           "minOSVersion": "26.0"
         }
       ]
