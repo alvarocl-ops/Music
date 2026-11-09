@@ -1,0 +1,452 @@
+//
+// DatabaseService.swift
+// Trop
+//
+// Created by 686udjie on 30/06/2026.
+//
+
+import Combine
+import Foundation
+import GRDB
+
+actor DatabaseService {
+    nonisolated static let shared = DatabaseService()
+
+    let dbPool: DatabasePool
+
+    init() {
+        var pool: DatabasePool?
+        do {
+            let url = try FileManager.default
+                .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                .appendingPathComponent("trop.sqlite")
+            let diskPool = try DatabasePool(path: url.path)
+            var migrator = DatabaseMigrator()
+            Self.registerMigrations(&migrator)
+            try migrator.migrate(diskPool)
+            pool = diskPool
+        } catch {
+            Log.db.error("Database setup failed: \(error). Falling back to a temporary database.")
+        }
+
+        if let pool {
+            dbPool = pool
+        } else {
+            dbPool = Self.makeFallbackPool()
+        }
+    }
+
+    /// Creates a temporary database so the app keeps running when the on-disk
+    /// database is corrupt or unavailable. Data will not persist across launches.
+    private static func makeFallbackPool() -> DatabasePool {
+        let fallbackURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trop-fallback.sqlite")
+        try? FileManager.default.removeItem(at: fallbackURL)
+        if let tempPool = try? DatabasePool(path: fallbackURL.path) {
+            var migrator = DatabaseMigrator()
+            registerMigrations(&migrator)
+            try? migrator.migrate(tempPool)
+            return tempPool
+        }
+        var migrator = DatabaseMigrator()
+        registerMigrations(&migrator)
+        guard let memoryPool = try? DatabasePool(path: ":memory:") else {
+            Log.db.error("Unable to create any database pool - attempting Configuration fallback")
+            var config = Configuration()
+            config.readonly = false
+            if let fallback = try? DatabasePool(path: ":memory:", configuration: config) {
+                try? migrator.migrate(fallback)
+                return fallback
+            }
+            Log.db.error("All in-memory fallbacks failed")
+            fatalError("Unable to create any database pool")
+        }
+        try? migrator.migrate(memoryPool)
+        return memoryPool
+    }
+
+    private static func registerMigrations(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v1", migrate: DatabaseMigrations.v1)
+        migrator.registerMigration("v2", migrate: DatabaseMigrations.v2)
+        migrator.registerMigration("v3", migrate: DatabaseMigrations.v3)
+        migrator.registerMigration("v4", migrate: DatabaseMigrations.v4)
+        migrator.registerMigration("v5", migrate: DatabaseMigrations.v5)
+        migrator.registerMigration("v6", migrate: DatabaseMigrations.v6)
+        migrator.registerMigration("v7", migrate: DatabaseMigrations.v7)
+        migrator.registerMigration("v8", migrate: DatabaseMigrations.v8)
+    }
+}
+
+// MARK: Generic CRUD
+
+extension DatabaseService {
+    @discardableResult
+    func insert<T: MutablePersistableRecord & Sendable>(_ record: T) async throws -> T {
+        try await dbPool.write { db -> T in
+            var mutable = record
+            try mutable.insert(db)
+            return mutable
+        }
+    }
+
+    @discardableResult
+    func insert<T: MutablePersistableRecord & Sendable>(_ record: T, onConflict: Database.ConflictResolution) async throws -> T {
+        try await dbPool.write { db -> T in
+            var mutable = record
+            try mutable.insert(db, onConflict: onConflict)
+            return mutable
+        }
+    }
+
+    func update<T: MutablePersistableRecord & Sendable>(_ record: T) async throws {
+        try await dbPool.write { db in
+            let mutable = record
+            _ = try mutable.update(db)
+        }
+    }
+
+    func save<T: MutablePersistableRecord & Sendable>(_ record: T) async throws {
+        try await dbPool.write { db in
+            var mutable = record
+            _ = try mutable.save(db)
+        }
+    }
+
+    @discardableResult
+    func insertOrReplace<T: MutablePersistableRecord & Sendable>(_ record: T) async throws -> T {
+        try await dbPool.write { db -> T in
+            var mutable = record
+            try mutable.insert(db, onConflict: .replace)
+            return mutable
+        }
+    }
+
+    @discardableResult
+    func delete<T: MutablePersistableRecord & Sendable>(_ record: T) async throws -> Bool {
+        try await dbPool.write { db -> Bool in
+            let mutable = record
+            return try mutable.delete(db)
+        }
+    }
+
+    func fetchOne<T: FetchableRecord & TableRecord & Sendable>(_ type: T.Type, key: some DatabaseValueConvertible & Sendable) async throws -> T? {
+        try await dbPool.read { db -> T? in
+            try type.fetchOne(db, key: key)
+        }
+    }
+
+    func fetchAll<T: FetchableRecord & TableRecord & Sendable>(_ type: T.Type) async throws -> [T] {
+        try await dbPool.read { db -> [T] in
+            try type.fetchAll(db)
+        }
+    }
+
+    func fetchAll<T: FetchableRecord & TableRecord & Sendable>(_ type: T.Type, sql: String, arguments: StatementArguments = []) async throws -> [T] {
+        try await dbPool.read { db -> [T] in
+            try type.fetchAll(db, sql: sql, arguments: arguments)
+        }
+    }
+
+    func write(_ block: @escaping @Sendable (Database) throws -> Void) async throws {
+        try await dbPool.write { db in
+            try block(db)
+        }
+    }
+
+    func read<T: Sendable>(_ block: @escaping @Sendable (Database) throws -> T) async throws -> T {
+        try await dbPool.read { db in
+            try block(db)
+        }
+    }
+
+    /// `?` placeholders for `IN (...)` clauses. Callers must guard against
+    /// empty input first (`IN ()` is invalid SQL).
+    static func placeholders(count: Int) -> String {
+        Array(repeating: "?", count: max(count, 0)).joined(separator: ",")
+    }
+
+    static func chunked(_ ids: [String], size: Int = 500) -> [[String]] {
+        guard !ids.isEmpty else { return [] }
+        return stride(from: 0, to: ids.count, by: size).map {
+            Array(ids[$0..<min($0 + size, ids.count)])
+        }
+    }
+
+    /// Songs keyed by id. Empty input → `[:]`.
+    static func fetchSongMapByIds(_ ids: [String], db: Database) throws -> [String: SongEntity] {
+        guard !ids.isEmpty else { return [:] }
+        let fetched = try SongEntity.fetchAll(
+            db,
+            sql: "SELECT * FROM song WHERE id IN (\(placeholders(count: ids.count)))",
+            arguments: StatementArguments(ids)
+        )
+        return Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0) })
+    }
+}
+
+// MARK: Playback Transactions
+
+extension DatabaseService {
+    func incrementTotalPlayTime(songId: String, playTimeMs: Int64) async throws {
+        try await dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE song SET total_play_time = total_play_time + ? WHERE id = ?",
+                arguments: [playTimeMs, songId])
+        }
+    }
+
+    func incrementPlayCount(songId: String, year: Int, month: Int) async throws {
+        try await dbPool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO play_count (song_id, year, month, count)
+                    VALUES (?, ?, ?, 1)
+                    ON CONFLICT(song_id, year, month) DO UPDATE SET
+                        count = count + 1
+                    """,
+                arguments: [songId, year, month])
+        }
+    }
+}
+
+enum LibrarySongSort: String, CaseIterable, Sendable, Identifiable {
+    case recentlyAdded = "Recently Added"
+    case title = "Title"
+    case artist = "Artist"
+    case mostPlayed = "Most Played"
+
+    var id: String { rawValue }
+    var displayName: String { rawValue }
+}
+
+// MARK: Personalization Queries
+
+extension DatabaseService {
+
+    /// Liked songs ordered by play count (for QuickPicks)
+    func fetchLikedSongs() async throws -> [SongEntity] {
+        try await dbPool.read { db in
+            try SongEntity
+                .filter(Column("liked") == true)
+                .order(Column("total_play_time").desc)
+                .limit(25)
+                .fetchAll(db)
+        }
+    }
+
+    /// Recently played songs (for KeepListening)
+    func fetchRecentSongs(days: Int = 30, limit: Int = 20) async throws -> [SongEntity] {
+        try await dbPool.read { db in
+            let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+            let recentIds = try Event
+                .filter(Column("timestamp") > cutoff)
+                .select(Column("song_id"))
+                .distinct()
+                .order(Column("timestamp").desc)
+                .limit(limit)
+                .asRequest(of: String.self)
+                .fetchAll(db)
+            guard !recentIds.isEmpty else { return [] }
+            let byId = try Self.fetchSongMapByIds(recentIds, db: db)
+            // Preserve recency order from recentIds (distinct order by timestamp desc)
+            return recentIds.compactMap { byId[$0] }
+        }
+    }
+
+    /// Forgotten favorites: liked songs not played in N days
+    func fetchForgottenFavorites(days: Int = 60, limit: Int = 15) async throws -> [SongEntity] {
+        try await dbPool.read { db in
+            let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+            let df = ISO8601DateFormatter()
+            let cutoffStr = df.string(from: cutoff)
+            return try SongEntity.fetchAll(db, sql: """
+                SELECT * FROM song
+                WHERE liked = 1
+                AND id NOT IN (SELECT DISTINCT song_id FROM event WHERE timestamp > ?)
+                ORDER BY total_play_time ASC
+                LIMIT ?
+                """, arguments: [cutoffStr, limit])
+        }
+    }
+
+    /// Most played albums (from liked/bookmarked albums)
+    func fetchAlbums(limit: Int = 10) async throws -> [AlbumEntity] {
+        try await dbPool.read { db in
+            try AlbumEntity
+                .filter(Column("bookmarked_at") != nil)
+                .order(Column("bookmarked_at").desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    /// Most played artists (from subscribed artists)
+    func fetchArtists(limit: Int = 10) async throws -> [ArtistEntity] {
+        try await dbPool.read { db in
+            try ArtistEntity
+                .filter(Column("bookmarked_at") != nil)
+                .order(Column("name").asc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    /// User's playlists
+    func fetchPlaylists(limit: Int = 10) async throws -> [PlaylistEntity] {
+        try await dbPool.read { db in
+            try PlaylistEntity
+                .filter(Column("bookmarked_at") != nil)
+                .order(Column("bookmarked_at").desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    func fetchAllLikedSongs(sort: LibrarySongSort = .recentlyAdded) async throws -> [SongEntity] {
+        try await dbPool.read { db in
+            var request = SongEntity.filter(Column("liked") == true)
+            switch sort {
+            case .title:
+                request = request.order(Column("title").asc)
+            case .artist:
+                request = request.order(Column("artist_name").asc, Column("title").asc)
+            case .recentlyAdded:
+                request = request.order(Column("create_date").desc)
+            case .mostPlayed:
+                request = request.order(Column("total_play_time").desc)
+            }
+            return try request.fetchAll(db)
+        }
+    }
+
+    func fetchAllAlbums() async throws -> [AlbumEntity] {
+        try await dbPool.read { db in
+            try AlbumEntity
+                .filter(Column("bookmarked_at") != nil)
+                .order(Column("title").asc)
+                .fetchAll(db)
+        }
+    }
+
+    func fetchAllPodcasts() async throws -> [PodcastEntity] {
+        try await dbPool.read { db in
+            try PodcastEntity
+                .filter(Column("subscribed_at") != nil)
+                .order(Column("name").asc)
+                .fetchAll(db)
+        }
+    }
+
+    func fetchAllLikedSongCount() async throws -> Int {
+        try await dbPool.read { db in
+            try SongEntity.filter(Column("liked") == true).fetchCount(db)
+        }
+    }
+
+    func fetchTopSongs(limit: Int) async throws -> [SongEntity] {
+        try await dbPool.read { db in
+            try SongEntity.fetchAll(db, sql: """
+                SELECT * FROM song
+                WHERE total_play_time > 0
+                ORDER BY total_play_time DESC
+                LIMIT ?
+            """, arguments: [limit])
+        }
+    }
+
+    func fetchTopSongs(limit: Int, from: Date, to: Date) async throws -> [SongEntity] {
+        try await dbPool.read { db in
+            try SongEntity.fetchAll(db, sql: """
+                SELECT song.* FROM song
+                JOIN (
+                    SELECT song_id FROM event
+                    WHERE timestamp > ? AND timestamp <= ?
+                    GROUP BY song_id
+                    ORDER BY SUM(play_time) DESC
+                    LIMIT ?
+                ) AS top ON song.id = top.song_id
+            """, arguments: [from, to, limit])
+        }
+    }
+
+    func orphanSongIds() async throws -> [String] {
+        try await dbPool.read { db in
+            try String.fetchAll(db, sql: "SELECT DISTINCT song_id FROM event WHERE song_id NOT IN (SELECT id FROM song)")
+        }
+    }
+}
+
+// MARK: History
+
+extension DatabaseService {
+    struct HistoryEntry: Sendable, Hashable {
+        var event: Event
+        var song: SongEntity?
+    }
+
+    func fetchHistory(limit: Int = 50) async throws -> [HistoryEntry] {
+        try await dbPool.read { db in
+            let events = try Event
+                .order(Column("timestamp").desc)
+                .limit(limit)
+                .fetchAll(db)
+
+            let songIds = events.map(\.songId)
+            guard !songIds.isEmpty else { return [] }
+
+            let songs = try Self.fetchSongMapByIds(songIds, db: db)
+
+            return events.map { HistoryEntry(event: $0, song: songs[$0.songId]) }
+        }
+    }
+}
+
+// MARK: Reactive Observation
+
+extension DatabaseService {
+    func observeAll<T: FetchableRecord & TableRecord & Sendable>(_ type: T.Type) -> AnyPublisher<[T], Error> {
+        ValueObservation
+            .tracking { db in try type.fetchAll(db) }
+            .publisher(in: dbPool, scheduling: .async(onQueue: .main))
+            .eraseToAnyPublisher()
+    }
+
+    func observeAll<T: FetchableRecord & TableRecord & Sendable>(
+        _ type: T.Type,
+        sql: String,
+        arguments: StatementArguments = [])
+        -> AnyPublisher<[T], Error>
+    {
+        ValueObservation
+            .tracking { db in try type.fetchAll(db, sql: sql, arguments: arguments) }
+            .publisher(in: dbPool, scheduling: .async(onQueue: .main))
+            .eraseToAnyPublisher()
+    }
+}
+
+// MARK: - Speed Dial (homepage pinning)
+
+extension DatabaseService {
+    func fetchSpeedDial(limit: Int = 20) async throws -> [SpeedDialEntry] {
+        try await dbPool.read { db in
+            try SpeedDialEntry
+                .order(Column("pinned_at").desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    func isPinnedToSpeedDial(videoId: String) async throws -> Bool {
+        try await fetchOne(SpeedDialEntry.self, key: videoId) != nil
+    }
+
+    func pinToSpeedDial(song: SongItem) async throws {
+        try await insertOrReplace(SpeedDialEntry(song: song))
+    }
+
+    func removeFromSpeedDial(videoId: String) async throws {
+        try await write { db in
+            _ = try SpeedDialEntry.deleteOne(db, key: videoId)
+        }
+    }
+}

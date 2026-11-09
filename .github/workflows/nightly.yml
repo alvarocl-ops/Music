@@ -1,0 +1,154 @@
+name: Nightly Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  # PRs each get their own group so they do not cancel one another
+  group: trop-nightly-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+  cancel-in-progress: true
+
+env:
+  FFMPEG_KIT_TAG: v9.0.0
+
+jobs:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-26
+    # Skip bot commits created by release publishing.
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       !contains(github.event.head_commit.message, '[skip ci]'))
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1.7.0
+        with:
+          xcode-version: latest-stable
+
+      - name: Cache ffmpeg-kit XCFrameworks
+        uses: actions/cache@v4
+        with:
+          path: build/ffmpeg-kit-xcframeworks
+          key: ffmpeg-kit-${{ env.FFMPEG_KIT_TAG }}-arm64+sim-openssl-${{ runner.os }}
+
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: build/DerivedDataApp
+          key: trop-dd-${{ runner.os }}-${{ hashFiles('Trop.xcodeproj/**', '**/Package.resolved', 'Trop/**/*.swift') }}
+          restore-keys: |
+            trop-dd-${{ runner.os }}-
+
+      - name: Make build script executable
+        run: chmod +x ./build_ipa.sh
+
+      - name: Build iOS IPA
+        run: ./build_ipa.sh
+        env:
+          FFMPEG_KIT_TAG: ${{ env.FFMPEG_KIT_TAG }}
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
+          CURRENT_PROJECT_VERSION: ${{ github.run_number }}
+
+      - name: Upload iOS IPA artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: Trop-iOS
+          path: build/Trop.ipa
+
+      - name: Publish nightly release
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+          COMMIT_SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          IPA_PATH="build/Trop.ipa"
+          test -f "$IPA_PATH"
+
+          # Create the floating nightly prerelease if missing, then replace the IPA asset.
+          if ! gh release view nightly >/dev/null 2>&1; then
+            gh release create nightly \
+              --prerelease \
+              --title "Nightly" \
+              --notes "Floating nightly IPA from the latest successful main build. Replaced on each push to main." \
+              --target main
+          fi
+
+          # Remove prior Trop.ipa so upload is a clean overwrite.
+          EXISTING_ASSET_ID="$(gh api "repos/${{ github.repository }}/releases/tags/nightly" \
+            --jq '.assets[] | select(.name == "Trop.ipa") | .id' || true)"
+          if [ -n "${EXISTING_ASSET_ID:-}" ]; then
+            gh api -X DELETE "repos/${{ github.repository }}/releases/assets/${EXISTING_ASSET_ID}"
+          fi
+
+          gh release upload nightly "$IPA_PATH" --clobber
+
+          NOTES="$(printf '%s' "${COMMIT_SUBJECT:-}" | head -n 1 | tr -d '\r')"
+          if [ -z "$NOTES" ]; then
+            NOTES="Nightly build #${RUN_NUMBER}"
+          fi
+          # Single-line notes avoid breaking the YAML run block indentation.
+          gh release edit nightly --notes "Latest main build (#${RUN_NUMBER}). ${NOTES}"
+
+      - name: Update AltStore source (nightly)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          IPA_PATH="build/Trop.ipa"
+          export SIZE="$(stat -f%z "$IPA_PATH")"
+          export DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/nightly/Trop.ipa"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("altstore.json")
+          source = json.loads(path.read_text())
+          app = source["apps"][0]
+          current_ver = app.get("versions", [{}])[0].get("version", "0.0.4")
+          entry = {
+              "version": current_ver,
+              "buildVersion": str(os.environ["BUILD_NUMBER"]),
+              "date": os.environ["DATE"],
+              "localizedDescription": f"Nightly build #{os.environ['BUILD_NUMBER']} from main branch",
+              "downloadURL": os.environ["DOWNLOAD_URL"],
+              "size": int(os.environ["SIZE"]),
+              "minOSVersion": "26.0",
+          }
+          app["versions"] = [entry]
+          path.write_text(json.dumps(source, indent=2) + "\n")
+          print(f"Updated altstore.json -> v{entry['version']} (build {entry['buildVersion']}, {entry['size']} bytes)")
+          PY
+
+      - name: Commit AltStore source
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add altstore.json
+          if git diff --cached --quiet; then
+            echo "altstore.json unchanged"
+            exit 0
+          fi
+          git commit -m "altstore.json: update nightly build #${{ github.run_number }} [skip ci]"
+          git push origin HEAD:main || echo "::warning::Failed to push altstore.json update. Ensure Workflow permissions have Read and write permissions enabled in Repo Settings > Actions > General."

@@ -1,0 +1,51 @@
+{
+  "originHash" : "0ce07dc01276a26151a79683f67229db741fb5ec8bba83bd40313248587f1489",
+  "pins" : [
+    {
+      "identity" : "grdb.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/groue/GRDB.swift.git",
+      "state" : {
+        "revision" : "2cf6c756e1e5ef6901ebae16576a7e4e4b834622",
+        "version" : "6.29.3"
+      }
+    },
+    {
+      "identity" : "marquee",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SwiftUIKit/Marquee.git",
+      "state" : {
+        "revision" : "69d7b7c6c34ed41d9299cfa8406f91f529c4fef3",
+        "version" : "0.3.0"
+      }
+    },
+    {
+      "identity" : "mpvkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mpvkit/MPVKit.git",
+      "state" : {
+        "revision" : "288527dffbc6d3e63cce147fc7b520c64a791603",
+        "version" : "1.0.0"
+      }
+    },
+    {
+      "identity" : "nuke",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/kean/Nuke.git",
+      "state" : {
+        "revision" : "83e19143355b02e9261edb2323b3e1e93287ebb9",
+        "version" : "12.9.0"
+      }
+    },
+    {
+      "identity" : "swiftytube",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/686udjie/SwiftyTube.git",
+      "state" : {
+        "revision" : "ad6ec0ce9d4116801fee0951e37179cfca27c188",
+        "version" : "0.0.6"
+      }
+    }
+  ],
+  "version" : 3
+}
