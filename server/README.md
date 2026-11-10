@@ -9,17 +9,39 @@ Permite separar cualquier canción de YouTube Music en:
 
 ---
 
-## Opciones de Despliegue
+## Despliegue en la Nube (100% GRATIS en Hugging Face Spaces)
 
-### Opción 1: Hugging Face Spaces (100% GRATIS con GPU)
-1. Ve a [Hugging Face Spaces](https://huggingface.co/spaces) y crea un nuevo Space.
-2. Selecciona **Docker** como SDK y **Blank**.
-3. Sube los archivos de esta carpeta (`Dockerfile`, `requirements.txt`, `main.py`).
-4. En Settings del Space, activa **ZeroGPU** (aceleración GPU gratuita de NVIDIA).
-5. Copia la URL pública directa de tu Space (ejemplo: `https://tu-usuario-trop-karaoke.hf.space`).
-6. En Trop en tu iPhone: ve a **Settings → Player → Karaoke IA** y pega la URL.
+No necesitas tener tu ordenador encendido ni pagar nada:
 
-### Opción 2: Docker Local (en tu PC / Mac / Servidor Casero)
+1. En la pantalla de **Create a new Space** de Hugging Face:
+   - **Space name:** ponle por ejemplo `trop-karaoke`
+   - **License:** elige `mit` o déjalo vacío
+   - **Select the Space SDK:** Deja seleccionado **Gradio**
+   - **Choose a Gradio template:** Deja seleccionado **Blank**
+   - **Space hardware:** Selecciona **CPU Basic** (gratis e ilimitado 24/7) o **ZeroGPU Free**
+   - Haz clic en **Create Space** al final de la página.
+
+2. En tu nuevo Space:
+   - Haz clic en la pestaña **Files** → **Add file** → **Create a new file**.
+   - Crea un archivo llamado `packages.txt` con el contenido:
+     ```text
+     ffmpeg
+     ```
+   - Crea un archivo llamado `requirements.txt` con el contenido de [requirements.txt](requirements.txt).
+   - Crea un archivo llamado `app.py` con el contenido de [app.py](app.py).
+
+3. Una vez creado el archivo, Hugging Face construirá el Space automáticamente en 1-2 minutos.
+4. Tu URL directa será:
+   `https://<tu-usuario>-trop-karaoke.hf.space`
+5. En tu iPhone, abre Trop y ve a:
+   **Ajustes → Reproductor → Karaoke & Separación IA**
+   Pega esa URL en **URL Servidor IA** y activa **Separar con Servidor IA**.
+
+---
+
+## Opciones Alternativas de Despliegue
+
+### Docker Local (en tu PC / Mac / Servidor Casero)
 Si tienes un ordenador en casa en la misma red Wi-Fi:
 ```bash
 cd server
@@ -29,14 +51,11 @@ El servidor escuchará en el puerto `8000`.
 En tu iPhone conectado al mismo Wi-Fi, pon la IP local de tu ordenador:
 `http://192.168.1.XX:8000`
 
-### Opción 3: Railway / Fly.io / VPS
-Puedes conectar este repositorio a Railway o Fly.io seleccionando el Dockerfile de la carpeta `server`.
-
 ---
 
 ## Endpoints de la API
 
-- `GET /api/health` — Comprueba el estado del servidor y si tiene GPU disponible.
-- `POST /api/separate` — Recibe `{"video_id": "...", "title": "...", "artist": "..."}` e inicia la separación en segundo plano.
+- `GET /api/health` — Comprueba el estado del servidor y disponibilidad de aceleración.
+- `POST /api/separate` — Recibe `{"video_id": "...", "title": "...", "artist": "..."}` e inicia la separación con Demucs.
 - `GET /api/stems/{video_id}` — Devuelve el estado (`ready`, `processing`, `error`), porcentaje de progreso y las URLs de los stems.
 - `GET /stems/{video_id}/quad.m4a` — Archivo de 4 canales utilizado por Trop para mezclar instrumental + voz en vivo.
