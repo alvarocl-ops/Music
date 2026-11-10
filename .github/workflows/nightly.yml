@@ -56,7 +56,9 @@ jobs:
         run: chmod +x ./build_ipa.sh
 
       - name: Build iOS IPA
-        run: ./build_ipa.sh
+        run: |
+          export MARKETING_VERSION="0.0.$(( ${{ github.run_number }} + 2 ))"
+          ./build_ipa.sh
         env:
           FFMPEG_KIT_TAG: ${{ env.FFMPEG_KIT_TAG }}
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
@@ -143,7 +145,11 @@ jobs:
               "size": int(os.environ["SIZE"]),
               "minOSVersion": "26.0",
           }
-          app["versions"] = [entry]
+          existing = [
+              v for v in app.get("versions", [])
+              if not (v.get("version") == actual_version and v.get("buildVersion") == actual_build)
+          ]
+          app["versions"] = [entry] + existing[:9]
           path.write_text(json.dumps(source, indent=2) + "\n")
           print(f"Updated altstore.json -> v{entry['version']} (build {entry['buildVersion']}, {entry['size']} bytes)")
           PY

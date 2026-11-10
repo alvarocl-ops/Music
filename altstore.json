@@ -1,5 +1,7 @@
 {
   "name": "Trop",
+  "identifier": "com.686udjie.Trop.source",
+  "sourceURL": "https://raw.githubusercontent.com/alvarocl-ops/Music/main/altstore.json",
   "subtitle": "YouTube Music client for iOS",
   "description": "Free and open source YouTube Music client. Builds from GitHub Actions \u2014 unsigned IPAs that Feather, AltStore, or SideStore re-sign with your Apple ID.",
   "iconURL": "https://raw.githubusercontent.com/alvarocl-ops/Music/main/.github/assets/icon.png",
@@ -14,7 +16,7 @@
       "bundleIdentifier": "com.686udjie.Trop",
       "developerName": "alvarocl-ops",
       "subtitle": "YouTube Music client for iOS",
-      "localizedDescription": "A free and open source YouTube Music client for iOS.\n\n\u2022 No ads\n\u2022 Stream songs and videos from YouTube Music\n\u2022 Background playback with lock screen controls\n\u2022 Equalizer & audio normalization\n\u2022 Video mode\n\u2022 Queue management & listening history\n\u2022 Discord status \u2013 show current song\n\u2022 Last.fm scrobbling\n\u2022 Synced lyrics (Musixmatch, Netease, Kugou, LRCLIB, Genius)\n\u2022 Library sync (playlists, albums, artists, podcasts)\n\u2022 Downloads\n\u2022 Custom app icons\n\nRequires iOS 26 or later and a YouTube Music account.",
+      "localizedDescription": "A free and open source YouTube Music client for iOS.\n\n\u2022 No ads\n\u2022 Stream songs and videos from YouTube Music\n\u2022 Karaoke Sing Mode (real-time vocal volume slider)\n\u2022 Background playback with lock screen controls\n\u2022 Equalizer & audio normalization\n\u2022 Video mode\n\u2022 Queue management & listening history\n\u2022 Discord status \u2013 show current song\n\u2022 Last.fm scrobbling\n\u2022 Synced lyrics (Musixmatch, Netease, Kugou, LRCLIB, Genius)\n\u2022 Library sync (playlists, albums, artists, podcasts)\n\u2022 Downloads\n\u2022 Custom app icons\n\nRequires iOS 26 or later and a YouTube Music account.",
       "iconURL": "https://raw.githubusercontent.com/alvarocl-ops/Music/main/.github/assets/icon.png",
       "tintColor": "#007AFF",
       "category": "entertainment",
@@ -28,9 +30,18 @@
           "version": "0.0.4",
           "buildVersion": "2",
           "date": "2026-11-10T14:47:59Z",
-          "localizedDescription": "Nightly build #2 from main branch",
+          "localizedDescription": "Nightly build #2: Añadido Modo Cantar (Karaoke) con barra vertical de volumen de voz en tiempo real.",
           "downloadURL": "https://github.com/alvarocl-ops/Music/releases/download/nightly/Trop.ipa",
           "size": 47634147,
+          "minOSVersion": "26.0"
+        },
+        {
+          "version": "0.0.3",
+          "buildVersion": "1",
+          "date": "2026-11-09T15:51:27Z",
+          "localizedDescription": "Nightly build #1 from main branch",
+          "downloadURL": "https://github.com/alvarocl-ops/Music/releases/download/nightly/Trop.ipa",
+          "size": 47607119,
           "minOSVersion": "26.0"
         }
       ]
