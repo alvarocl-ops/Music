@@ -294,7 +294,7 @@ extension PlayerController {
                 // vocalLevel = 1.0 -> cancelFactor = 0.0 (clean stereo track, filter bypassed)
                 let cancelFactor = max(0.0, min(1.0, 1.0 - vocalLevel))
                 if cancelFactor > 0.01 {
-                    filters.append("pan=stereo|c0=c0-\(Self.fmt(cancelFactor))*c1|c1=c1-\(Self.fmt(cancelFactor))*c0")
+                    filters.append("lavfi=[pan=stereo|c0=c0-\(Self.fmt(cancelFactor))*c1|c1=c1-\(Self.fmt(cancelFactor))*c0]")
                 }
             }
             if eqEnabled {
