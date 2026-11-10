@@ -54,6 +54,8 @@ final class PlayerController {
     nonisolated(unsafe) var voWarmedVideoId: String?
     nonisolated(unsafe) var muxedActive = false
     nonisolated(unsafe) var muxedVideoId: String?
+    nonisolated(unsafe) var isPlayingQuadStems = false
+    nonisolated(unsafe) var currentOriginalURL: URL?
     nonisolated(unsafe) var hasPresentedVideo = false
     nonisolated(unsafe) var voInitDrawableSize: CGSize = .zero
     private var lastGeometryRefreshAt = Date.distantPast
@@ -189,6 +191,8 @@ extension PlayerController {
         voWarmedVideoId = nil
         muxedActive = false
         muxedVideoId = nil
+        isPlayingQuadStems = false
+        currentOriginalURL = url
         pendingResumeAt = 0
         pendingSeek = nil
         videoModeSwitchInFlight = false
@@ -196,6 +200,9 @@ extension PlayerController {
         NowPlaying.shared.isVideoMode = false
         NowPlaying.shared.isVideoReady = false
         if hasPresentedVideo { clearVideoLayer() }
+        Task { @MainActor in
+            KaraokeSeparationService.shared.handleTrackChanged(videoId: videoId)
+        }
         let isReady = withMpv { _ in true } ?? false
         guard isReady else {
             Log.player.info("mpv not ready yet, parking URL for deferred load")
@@ -285,16 +292,35 @@ extension PlayerController {
         let karaokeEnabled = settings.karaokeModeEnabled
         let vocalLevel = max(0, min(1, settings.karaokeVocalLevel))
 
+        let isQuad = isPlayingQuadStems
+
         let chain: String = {
             var filters: [String] = []
             if karaokeEnabled {
-                // Out-of-phase center vocal attenuation via native MPV/FFmpeg pan filter:
-                // Attenuates centered vocals according to karaokeVocalLevel:
-                // vocalLevel = 0.0 -> cancelFactor = 1.0 (maximum vocal cancellation)
-                // vocalLevel = 1.0 -> cancelFactor = 0.0 (clean stereo track, filter bypassed)
-                let cancelFactor = max(0.0, min(1.0, 1.0 - vocalLevel))
-                if cancelFactor > 0.01 {
-                    filters.append("lavfi=[pan=stereo|c0=c0-\(Self.fmt(cancelFactor))*c1|c1=c1-\(Self.fmt(cancelFactor))*c0]")
+                if isQuad {
+                    // True AI Stem Mixing (4-channel audio stream from Demucs):
+                    // ch0, ch1 = pristine instrumental stereo (0% vocal, 0% echo)
+                    // ch2, ch3 = isolated vocal stereo
+                    // Dynamic slider mixes ch2/3 directly without any phase cancellation artifacts:
+                    filters.append("lavfi=[pan=stereo|c0=c0+\(Self.fmt(vocalLevel))*c2|c1=c1+\(Self.fmt(vocalLevel))*c3]")
+                } else {
+                    // In-phase vocal cancellation:
+                    // When cancelFactor = 1.0 (0% vocal level):
+                    //   c0 = 0.5000*c0 - 0.5000*c1
+                    //   c1 = 0.5000*c0 - 0.5000*c1
+                    // Both channels output identical positive phase (+1.0 correlation), eliminating the
+                    // inverted-phase headphone comb-filter effect ("eco en el vacío").
+                    let cancelFactor = max(0.0, min(1.0, 1.0 - vocalLevel))
+                    if cancelFactor > 0.01 {
+                        let halfCancel = cancelFactor * 0.5
+                        let c0_c0 = 1.0 - halfCancel
+                        let c0_c1 = -halfCancel
+                        let c1_c0 = halfCancel
+                        let c1_c1 = 1.0 - 3.0 * halfCancel
+                        let c0_str = Self.panTerm(coeff: c0_c0, channel: "c0", isFirst: true) + Self.panTerm(coeff: c0_c1, channel: "c1", isFirst: false)
+                        let c1_str = Self.panTerm(coeff: c1_c0, channel: "c0", isFirst: true) + Self.panTerm(coeff: c1_c1, channel: "c1", isFirst: false)
+                        filters.append("lavfi=[pan=stereo|c0=\(c0_str)|c1=\(c1_str)]")
+                    }
                 }
             }
             if eqEnabled {
@@ -322,6 +348,52 @@ extension PlayerController {
             }
         }
         applyPlayerVolume()
+    }
+
+    func switchToQuadStems(url: URL) {
+        let pos = currentTime
+        let playing = NowPlaying.shared.isPlaying
+        isPlayingQuadStems = true
+
+        let loadArgs = pos > 0
+            ? ["loadfile", url.absoluteString, "replace", "-1", "start=\(Int(pos.rounded(.down)))"]
+            : ["loadfile", url.absoluteString, "replace"]
+
+        withMpv { mpv in
+            _ = loadArgs.withUnsafeCArg { mpv_command(mpv, $0) }
+            mpv_set_property_string(mpv, "pause", playing ? "no" : "yes")
+        }
+        applyPlaybackSettings()
+        Log.player.info("Switched to AI Quad Stems at time \(pos)s")
+    }
+
+    func revertFromQuadStems() {
+        guard isPlayingQuadStems, let orig = currentOriginalURL else { return }
+        let pos = currentTime
+        let playing = NowPlaying.shared.isPlaying
+        isPlayingQuadStems = false
+
+        let loadArgs = pos > 0
+            ? ["loadfile", orig.absoluteString, "replace", "-1", "start=\(Int(pos.rounded(.down)))"]
+            : ["loadfile", orig.absoluteString, "replace"]
+
+        withMpv { mpv in
+            _ = loadArgs.withUnsafeCArg { mpv_command(mpv, $0) }
+            mpv_set_property_string(mpv, "pause", playing ? "no" : "yes")
+        }
+        applyPlaybackSettings()
+        Log.player.info("Reverted from Quad Stems to original stream at time \(pos)s")
+    }
+
+    private static func panTerm(coeff: Double, channel: String, isFirst: Bool) -> String {
+        let absVal = abs(coeff)
+        let signStr: String
+        if isFirst {
+            signStr = coeff < -0.0001 ? "-" : ""
+        } else {
+            signStr = coeff < -0.0001 ? "-" : "+"
+        }
+        return "\(signStr)\(fmt(absVal))*\(channel)"
     }
 
     private static func fmt(_ value: Double) -> String {

@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  trop-karaoke-ai:
+    build: .
+    container_name: trop-karaoke-ai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./stems:/app/stems
+      - ./cache:/app/cache
+    environment:
+      - PYTHONUNBUFFERED=1
+    # If running with NVIDIA GPU, uncomment below:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

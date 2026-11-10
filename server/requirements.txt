@@ -1,0 +1,10 @@
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.7.0
+yt-dlp>=2024.04.09
+demucs>=4.0.1
+torch>=2.2.0
+torchaudio>=2.2.0
+soundfile>=0.12.1
+numpy>=1.26.0
+python-multipart>=0.0.9

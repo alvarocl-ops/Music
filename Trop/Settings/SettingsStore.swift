@@ -260,6 +260,16 @@ final class SettingsStore {
         didSet { Self.defaults.set(karaokeVocalLevel, forKey: Keys.karaokeVocalLevel) }
     }
 
+    /// Cloud server URL for Demucs AI stem separation (e.g. https://my-space.hf.space).
+    var karaokeServerURL: String {
+        didSet { Self.defaults.set(karaokeServerURL, forKey: Keys.karaokeServerURL) }
+    }
+
+    /// Whether to use AI stem separation when a server is configured.
+    var karaokeUseAI: Bool {
+        didSet { Self.defaults.set(karaokeUseAI, forKey: Keys.karaokeUseAI) }
+    }
+
     // MARK: - Content
 
     var hideExplicit: Bool {
@@ -392,6 +402,8 @@ final class SettingsStore {
         static let canvasOverCellular = "settings.canvasOverCellular"
         static let karaokeModeEnabled = "settings.karaokeModeEnabled"
         static let karaokeVocalLevel = "settings.karaokeVocalLevel"
+        static let karaokeServerURL = "settings.karaokeServerURL"
+        static let karaokeUseAI = "settings.karaokeUseAI"
     }
 
     private static let defaults: UserDefaults = .standard
@@ -443,6 +455,8 @@ final class SettingsStore {
         artworkSwipeNavigation = Self.load(Keys.artworkSwipeNavigation, default: true)
         karaokeModeEnabled = Self.load(Keys.karaokeModeEnabled, default: false)
         karaokeVocalLevel = Self.load(Keys.karaokeVocalLevel, default: 0.12)
+        karaokeServerURL = Self.loadString(Keys.karaokeServerURL, default: "")
+        karaokeUseAI = Self.load(Keys.karaokeUseAI, default: true)
         hideExplicit = Self.load(Keys.hideExplicit, default: false)
         showQuickPicks = Self.load(Keys.showQuickPicks, default: true)
         topListsLength = Self.load(Keys.topListsLength, default: 8)

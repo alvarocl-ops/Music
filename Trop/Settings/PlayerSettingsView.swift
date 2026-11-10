@@ -25,6 +25,16 @@ struct PlayerSettingsView: View {
             }
 
             Section {
+                SettingsNavigationRow("Karaoke & Separación IA", icon: "mic.badge.sparkle") {
+                    KaraokeSettingsView()
+                }
+            } header: {
+                Text("Karaoke")
+            } footer: {
+                Text("Configura el servidor de inteligencia artificial (Demucs) para aislar voces e instrumentales con calidad de estudio.")
+            }
+
+            Section {
                 SettingsPickerRow("Audio Quality", icon: "waveform", selection: $settings.audioQuality)
                 SettingsToggleRow("Audio Normalization", icon: "speaker.wave.2", isOn: $settings.audioNormalization)
                 SettingsToggleRow("Gapless Playback", icon: "arrow.right.arrow.left", isOn: $settings.gaplessPlayback)

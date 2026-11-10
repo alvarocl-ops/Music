@@ -174,12 +174,20 @@ struct LyricsView<ProgressSlider: View>: View {
                                 settings.karaokeModeEnabled = newValue
                                 isKaraokeSliderExpanded = newValue
                             }
-                            player.applyPlaybackSettings()
                             if newValue {
+                                if let stems = KaraokeSeparationService.shared.activeStemsForCurrentTrack {
+                                    player.switchToQuadStems(url: stems.quadURL)
+                                } else if let videoId = np.videoId {
+                                    KaraokeSeparationService.shared.requestSeparation(videoId: videoId)
+                                }
                                 scheduleKaraokeSliderAutoCollapse()
                             } else {
+                                if player.isPlayingQuadStems {
+                                    player.revertFromQuadStems()
+                                }
                                 sliderCollapseTask?.cancel()
                             }
+                            player.applyPlaybackSettings()
                         }
                     ),
                     vocalLevel: Binding(
@@ -649,6 +657,8 @@ private struct KaraokeVerticalPillControl: View {
     @Binding var isExpanded: Bool
     let onInteraction: () -> Void
 
+    @ObservedObject private var separationService = KaraokeSeparationService.shared
+
     private let collapsedSize: CGFloat = 44
     private let expandedWidth: CGFloat = 54
     private let expandedHeight: CGFloat = 176
@@ -690,9 +700,29 @@ private struct KaraokeVerticalPillControl: View {
                     )
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
 
-                Image(systemName: isEnabled ? "mic.fill" : "mic.slash.fill")
-                    .font(.system(size: 19, weight: .bold))
-                    .foregroundStyle(isEnabled ? .black : .white)
+                if case .processing(let progress) = separationService.state {
+                    VStack(spacing: 2) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: isEnabled ? .black : .white))
+                            .scaleEffect(0.7)
+                        Text("\(Int(progress))%")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(isEnabled ? .black : .white)
+                    }
+                } else {
+                    ZStack {
+                        Image(systemName: isEnabled ? "mic.fill" : "mic.slash.fill")
+                            .font(.system(size: 19, weight: .bold))
+                            .foregroundStyle(isEnabled ? .black : .white)
+
+                        if PlayerController.shared.isPlayingQuadStems {
+                            Circle()
+                                .fill(Color.blue)
+                                .frame(width: 8, height: 8)
+                                .offset(x: 10, y: -10)
+                        }
+                    }
+                }
             }
             .frame(width: collapsedSize, height: collapsedSize)
             .contentShape(Rectangle())
@@ -741,6 +771,22 @@ private struct KaraokeVerticalPillControl: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 10)
+
+                    if PlayerController.shared.isPlayingQuadStems {
+                        Text("IA")
+                            .font(.system(size: 9, weight: .black))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.blue))
+                            .foregroundStyle(.white)
+                    } else if case .processing(let progress) = separationService.state {
+                        Text("\(Int(progress))%")
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.orange))
+                            .foregroundStyle(.white)
+                    }
 
                     Spacer()
 

@@ -106,7 +106,18 @@ struct LyricsMenuSheet: View {
                 }
             }
             .navigationTitle("Lyrics")
-            .onChange(of: settings.karaokeModeEnabled) { _, _ in
+            .onChange(of: settings.karaokeModeEnabled) { _, isEnabled in
+                if isEnabled {
+                    if let stems = KaraokeSeparationService.shared.activeStemsForCurrentTrack {
+                        PlayerController.shared.switchToQuadStems(url: stems.quadURL)
+                    } else if let videoId = np.videoId {
+                        KaraokeSeparationService.shared.requestSeparation(videoId: videoId)
+                    }
+                } else {
+                    if PlayerController.shared.isPlayingQuadStems {
+                        PlayerController.shared.revertFromQuadStems()
+                    }
+                }
                 PlayerController.shared.applyPlaybackSettings()
             }
             .onChange(of: settings.karaokeVocalLevel) { _, _ in
