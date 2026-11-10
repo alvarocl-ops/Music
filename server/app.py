@@ -252,4 +252,4 @@ def serve_stem(video_id: str, filename: str):
     return FileResponse(file_path, media_type="audio/mp4")
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(ssr_mode=False)
