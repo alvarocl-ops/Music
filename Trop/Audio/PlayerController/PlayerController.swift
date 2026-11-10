@@ -282,9 +282,19 @@ extension PlayerController {
         let eqGains = settings.equalizerGains
         let gapless = settings.gaplessPlayback
         let norm = settings.audioNormalization
+        let karaokeEnabled = settings.karaokeModeEnabled
+        let vocalLevel = max(0, min(1, settings.karaokeVocalLevel))
 
         let chain: String = {
             var filters: [String] = []
+            if karaokeEnabled {
+                // Mid/Side vocal separation via libavfilter stereotools:
+                // Attenuates center (mid/vocal) signal according to karaokeVocalLevel (0.015625 = -36dB cut to 1.0 = 0dB)
+                // while gently boosting side (stereo instrumental) presence so the backing track stays full.
+                let midLevel = max(0.015625, vocalLevel)
+                let sideBoost = 1.0 + (1.0 - vocalLevel) * 0.25
+                filters.append("stereotools=mlev=\(Self.fmt(midLevel)):slev=\(Self.fmt(sideBoost))")
+            }
             if eqEnabled {
                 let entries = zip(equalizerFrequencies, eqGains)
                     .map { "entry(\(Self.fmt($0.0)),\(Self.fmt($0.1)))" }

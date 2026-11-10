@@ -248,6 +248,18 @@ final class SettingsStore {
         didSet { Self.defaults.set(artworkSwipeNavigation, forKey: Keys.artworkSwipeNavigation) }
     }
 
+    // MARK: - Karaoke / Apple Music Sing
+
+    /// Enables real-time vocal separation / attenuation (Apple Music Sing style).
+    var karaokeModeEnabled: Bool {
+        didSet { Self.defaults.set(karaokeModeEnabled, forKey: Keys.karaokeModeEnabled) }
+    }
+
+    /// Vocal volume level when Karaoke Mode is active (0.0 = instrumental / full vocal cut, 1.0 = original vocal level).
+    var karaokeVocalLevel: Double {
+        didSet { Self.defaults.set(karaokeVocalLevel, forKey: Keys.karaokeVocalLevel) }
+    }
+
     // MARK: - Content
 
     var hideExplicit: Bool {
@@ -378,6 +390,8 @@ final class SettingsStore {
         static let syncSongs = "settings.syncSongs"
         static let canvasEnabled = "settings.canvasEnabled"
         static let canvasOverCellular = "settings.canvasOverCellular"
+        static let karaokeModeEnabled = "settings.karaokeModeEnabled"
+        static let karaokeVocalLevel = "settings.karaokeVocalLevel"
     }
 
     private static let defaults: UserDefaults = .standard
@@ -427,6 +441,8 @@ final class SettingsStore {
         lastRadioAllowExplicit = Self.load(Keys.lastRadioAllowExplicit, default: true)
         playerVolume = Self.load(Keys.playerVolume, default: 1)
         artworkSwipeNavigation = Self.load(Keys.artworkSwipeNavigation, default: true)
+        karaokeModeEnabled = Self.load(Keys.karaokeModeEnabled, default: false)
+        karaokeVocalLevel = Self.load(Keys.karaokeVocalLevel, default: 0.12)
         hideExplicit = Self.load(Keys.hideExplicit, default: false)
         showQuickPicks = Self.load(Keys.showQuickPicks, default: true)
         topListsLength = Self.load(Keys.topListsLength, default: 8)

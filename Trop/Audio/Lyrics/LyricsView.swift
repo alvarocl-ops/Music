@@ -36,6 +36,8 @@ struct LyricsView<ProgressSlider: View>: View {
     @State private var userHasScrolled = false
     @State private var hasPositionedInitialLyrics = false
     @State private var scrollProxy: ScrollViewProxy?
+    @State private var isKaraokeSliderExpanded = false
+    @State private var sliderCollapseTask: Task<Void, Never>?
 
     private var isLiked: Bool {
         guard let song = np.queueSongs.indices.contains(np.queueIndex) ? np.queueSongs[np.queueIndex] : nil else { return false }
@@ -151,6 +153,64 @@ struct LyricsView<ProgressSlider: View>: View {
 
             if userHasScrolled && !lines.isEmpty {
                 resyncButton
+            }
+
+            karaokeControlOverlay
+        }
+    }
+
+    // MARK: - Karaoke / Apple Music Sing Control
+
+    private var karaokeControlOverlay: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                KaraokeVerticalPillControl(
+                    isEnabled: Binding(
+                        get: { settings.karaokeModeEnabled },
+                        set: { newValue in
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                settings.karaokeModeEnabled = newValue
+                                isKaraokeSliderExpanded = newValue
+                            }
+                            player.applyPlaybackSettings()
+                            if newValue {
+                                scheduleKaraokeSliderAutoCollapse()
+                            } else {
+                                sliderCollapseTask?.cancel()
+                            }
+                        }
+                    ),
+                    vocalLevel: Binding(
+                        get: { settings.karaokeVocalLevel },
+                        set: { newLevel in
+                            settings.karaokeVocalLevel = newLevel
+                            if !settings.karaokeModeEnabled {
+                                settings.karaokeModeEnabled = true
+                            }
+                            player.applyPlaybackSettings()
+                            scheduleKaraokeSliderAutoCollapse()
+                        }
+                    ),
+                    isExpanded: $isKaraokeSliderExpanded,
+                    onInteraction: {
+                        scheduleKaraokeSliderAutoCollapse()
+                    }
+                )
+            }
+            .padding(.trailing, 20)
+            .padding(.bottom, 16)
+        }
+    }
+
+    private func scheduleKaraokeSliderAutoCollapse() {
+        sliderCollapseTask?.cancel()
+        sliderCollapseTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_200_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                isKaraokeSliderExpanded = false
             }
         }
     }
@@ -400,6 +460,20 @@ struct LyricsView<ProgressSlider: View>: View {
 
     private var playbackControls: some View {
         VStack(spacing: 6) {
+            if settings.karaokeModeEnabled {
+                HStack(spacing: 5) {
+                    Image(systemName: "mic.and.signal.meter.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Modo cantar · Voz \(Int((settings.karaokeVocalLevel * 100).rounded()))%")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(.white.opacity(0.85))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(.white.opacity(0.14)))
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+
             progressSlider()
 
             PlayerPlayPauseButton(isPlaying: np.isPlaying) {
@@ -410,6 +484,7 @@ struct LyricsView<ProgressSlider: View>: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
         .padding(.bottom, 20)
+        .animation(.easeInOut(duration: 0.25), value: settings.karaokeModeEnabled)
     }
 
     // MARK: - Data
@@ -565,3 +640,143 @@ private struct LyricsLineView: View {
         .animation(.easeInOut(duration: 0.3), value: isActive)
     }
 }
+
+// MARK: - Karaoke Vertical Pill Control (Apple Music Sing Style)
+
+private struct KaraokeVerticalPillControl: View {
+    @Binding var isEnabled: Bool
+    @Binding var vocalLevel: Double
+    @Binding var isExpanded: Bool
+    let onInteraction: () -> Void
+
+    private let collapsedSize: CGFloat = 44
+    private let expandedWidth: CGFloat = 54
+    private let expandedHeight: CGFloat = 176
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if isExpanded {
+                expandedSliderPill
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.85, anchor: .bottom).combined(with: .opacity),
+                        removal: .scale(scale: 0.85, anchor: .bottom).combined(with: .opacity)
+                    ))
+            } else {
+                compactMicButton
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: isExpanded)
+        .animation(.easeInOut(duration: 0.2), value: isEnabled)
+    }
+
+    private var compactMicButton: some View {
+        Button {
+            if isEnabled {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                    isExpanded = true
+                }
+                onInteraction()
+            } else {
+                isEnabled = true
+            }
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isEnabled ? Color.white : Color.white.opacity(0.18))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.white.opacity(isEnabled ? 0.9 : 0.25), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+
+                Image(systemName: isEnabled ? "mic.fill" : "mic.slash.fill")
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(isEnabled ? .black : .white)
+            }
+            .frame(width: collapsedSize, height: collapsedSize)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                isEnabled.toggle()
+            }
+        )
+        .accessibilityLabel(isEnabled ? "Adjust vocal volume" : "Enable Karaoke Sing mode")
+    }
+
+    private var expandedSliderPill: some View {
+        GeometryReader { geo in
+            let height = geo.size.height
+            let fillHeight = max(0, min(height, height * CGFloat(vocalLevel)))
+
+            ZStack(alignment: .bottom) {
+                // Frosted glass track background
+                RoundedRectangle(cornerRadius: 27, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 27, style: .continuous)
+                            .fill(Color.white.opacity(0.14))
+                    )
+
+                // White fill representing current vocal level
+                RoundedRectangle(cornerRadius: 27, style: .continuous)
+                    .fill(Color.white)
+                    .frame(height: fillHeight)
+
+                // Bottom mic icon + top toggle off button
+                VStack {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            isEnabled = false
+                            isExpanded = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(vocalLevel > 0.82 ? .black.opacity(0.6) : .white.opacity(0.75))
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.black.opacity(0.15)))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 10)
+
+                    Spacer()
+
+                    ZStack {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(vocalLevel > 0.22 ? Color.black : Color.white)
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(vocalLevel > 0.22 ? Color.black.opacity(0.75) : Color.white.opacity(0.8))
+                            .offset(x: 11, y: 7)
+                    }
+                    .padding(.bottom, 16)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 27, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let ratio = 1.0 - Double(value.location.y / height)
+                        let clamped = max(0.0, min(1.0, ratio))
+                        vocalLevel = clamped
+                        onInteraction()
+                    }
+                    .onEnded { _ in
+                        onInteraction()
+                    }
+            )
+        }
+        .frame(width: expandedWidth, height: expandedHeight)
+    }
+}
+

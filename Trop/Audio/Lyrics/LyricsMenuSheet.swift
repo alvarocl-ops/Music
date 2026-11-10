@@ -63,6 +63,46 @@ struct LyricsMenuSheet: View {
                         .tint(settings.accentColor)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
+
+                        Divider()
+
+                        Toggle(isOn: $settings.karaokeModeEnabled) {
+                            HStack(spacing: 14) {
+                                Image(systemName: "mic.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(settings.accentColor)
+                                    .frame(width: 26)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Karaoke Sing Mode")
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                    Text("Separates and attenuates vocals in real time")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .tint(settings.accentColor)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+
+                        if settings.karaokeModeEnabled {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Vocal Volume")
+                                        .font(.footnote.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text("\(Int((settings.karaokeVocalLevel * 100).rounded()))%")
+                                        .font(.footnote.monospacedDigit().weight(.semibold))
+                                        .foregroundStyle(settings.accentColor)
+                                }
+                                Slider(value: $settings.karaokeVocalLevel, in: 0...1, step: 0.01)
+                                    .tint(settings.accentColor)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                        }
                 }
             }
             .navigationTitle("Lyrics")
