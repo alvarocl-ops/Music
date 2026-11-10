@@ -27,6 +27,15 @@
       ],
       "versions": [
         {
+          "version": "0.0.8",
+          "buildVersion": "6",
+          "date": "2026-11-10T19:13:02Z",
+          "localizedDescription": "Nightly build #6 from main branch",
+          "downloadURL": "https://github.com/alvarocl-ops/Music/releases/download/nightly/Trop.ipa",
+          "size": 47669911,
+          "minOSVersion": "26.0"
+        },
+        {
           "version": "0.0.7",
           "buildVersion": "5",
           "date": "2026-11-10T18:35:36Z",
