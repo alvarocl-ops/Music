@@ -106,6 +106,12 @@ struct LyricsMenuSheet: View {
                 }
             }
             .navigationTitle("Lyrics")
+            .onChange(of: settings.karaokeModeEnabled) { _, _ in
+                PlayerController.shared.applyPlaybackSettings()
+            }
+            .onChange(of: settings.karaokeVocalLevel) { _, _ in
+                PlayerController.shared.applyPlaybackSettings()
+            }
         }
         .sheet(isPresented: $showOffsetEditor) {
             LyricsOffsetSheet()

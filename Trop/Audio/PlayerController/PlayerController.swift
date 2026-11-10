@@ -288,12 +288,14 @@ extension PlayerController {
         let chain: String = {
             var filters: [String] = []
             if karaokeEnabled {
-                // Mid/Side vocal separation via libavfilter stereotools:
-                // Attenuates center (mid/vocal) signal according to karaokeVocalLevel (0.015625 = -36dB cut to 1.0 = 0dB)
-                // while gently boosting side (stereo instrumental) presence so the backing track stays full.
-                let midLevel = max(0.015625, vocalLevel)
-                let sideBoost = 1.0 + (1.0 - vocalLevel) * 0.25
-                filters.append("stereotools=mlev=\(Self.fmt(midLevel)):slev=\(Self.fmt(sideBoost))")
+                // Out-of-phase center vocal attenuation via native MPV/FFmpeg pan filter:
+                // Attenuates centered vocals according to karaokeVocalLevel:
+                // vocalLevel = 0.0 -> cancelFactor = 1.0 (maximum vocal cancellation)
+                // vocalLevel = 1.0 -> cancelFactor = 0.0 (clean stereo track, filter bypassed)
+                let cancelFactor = max(0.0, min(1.0, 1.0 - vocalLevel))
+                if cancelFactor > 0.01 {
+                    filters.append("pan=stereo|c0=c0-\(Self.fmt(cancelFactor))*c1|c1=c1-\(Self.fmt(cancelFactor))*c0")
+                }
             }
             if eqEnabled {
                 let entries = zip(equalizerFrequencies, eqGains)
@@ -313,13 +315,17 @@ extension PlayerController {
         withMpv { mpv in
             mpv_set_property_string(mpv, "gapless-audio", gapless ? "yes" : "no")
             let result = mpv_set_property_string(mpv, "af", chain.isEmpty ? "" : chain)
-            if result < 0 { Log.player.error("Failed to set af chain '\(chain)': mpv error \(result)") }
+            if result < 0 {
+                Log.player.error("Failed to set af chain '\(chain)': mpv error \(result)")
+            } else {
+                Log.player.info("Successfully applied af chain '\(chain)'")
+            }
         }
         applyPlayerVolume()
     }
 
     private static func fmt(_ value: Double) -> String {
-        String(format: "%.4f", value)
+        String(format: Locale(identifier: "en_US_POSIX"), "%.4f", value)
     }
 }
 
