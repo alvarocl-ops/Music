@@ -3,8 +3,10 @@ import sys
 import shutil
 import asyncio
 import subprocess
+import re
 from pathlib import Path
 from typing import Dict, Optional
+import torch
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -17,7 +19,6 @@ CACHE_DIR = BASE_DIR / "cache"
 STEMS_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Jobs memory
 jobs: Dict[str, dict] = {}
 
 class SeparateRequest(BaseModel):
@@ -35,7 +36,6 @@ def stems_exist(video_id: str) -> bool:
 def process_separation_sync(video_id: str, title: Optional[str] = None, artist: Optional[str] = None):
     job_dir = get_job_dir(video_id)
     temp_dir = CACHE_DIR / f"temp_{video_id}"
-    
     try:
         jobs[video_id] = {"status": "processing", "progress": 10, "message": "Descargando audio de YouTube..."}
         if temp_dir.exists():
@@ -45,8 +45,7 @@ def process_separation_sync(video_id: str, title: Optional[str] = None, artist: 
 
         input_audio = temp_dir / "input.m4a"
         yt_url = f"https://www.youtube.com/watch?v={video_id}"
-        
-        # Download highest quality audio using yt-dlp with iOS/Android extractor args
+
         dl_cmd = [
             "yt-dlp",
             "--extractor-args", "youtube:player_client=ios,android,web",
@@ -67,13 +66,7 @@ def process_separation_sync(video_id: str, title: Optional[str] = None, artist: 
 
         jobs[video_id] = {"status": "processing", "progress": 35, "message": "Separando voz con IA (Demucs)..."}
 
-        # Determine torch device
-        try:
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except Exception:
-            device = "cpu"
-
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         demucs_out = temp_dir / "demucs_out"
         demucs_cmd = [
             "demucs",
@@ -85,7 +78,7 @@ def process_separation_sync(video_id: str, title: Optional[str] = None, artist: 
         ]
         res_demucs = subprocess.run(demucs_cmd, capture_output=True, text=True)
         if res_demucs.returncode != 0:
-            raise RuntimeError(f"Demucs falló: {res_demucs.stderr[:200]}")
+            raise RuntimeError(f"Demucs fallo: {res_demucs.stderr[:200]}")
 
         jobs[video_id] = {"status": "processing", "progress": 80, "message": "Codificando pistas de audio..."}
 
@@ -93,28 +86,25 @@ def process_separation_sync(video_id: str, title: Optional[str] = None, artist: 
         if not stem_track_dir:
             raise RuntimeError("No se encontraron los stems generados por Demucs.")
         target_dir = stem_track_dir[0]
-        
+
         vocals_wav = target_dir / "vocals.wav"
         no_vocals_wav = target_dir / "no_vocals.wav"
-        
+
         if not vocals_wav.exists() or not no_vocals_wav.exists():
             raise RuntimeError("Faltan archivos vocals.wav o no_vocals.wav")
 
-        # Encode instrumental.m4a
         subprocess.run([
             "ffmpeg", "-y", "-i", str(no_vocals_wav),
             "-c:a", "aac", "-b:a", "256k",
             str(job_dir / "instrumental.m4a")
         ], check=True, capture_output=True)
 
-        # Encode vocals.m4a
         subprocess.run([
             "ffmpeg", "-y", "-i", str(vocals_wav),
             "-c:a", "aac", "-b:a", "256k",
             str(job_dir / "vocals.m4a")
         ], check=True, capture_output=True)
 
-        # Merge into 4-channel quad.m4a (ch0,1: instrumental, ch2,3: vocals)
         subprocess.run([
             "ffmpeg", "-y",
             "-i", str(no_vocals_wav),
@@ -125,7 +115,7 @@ def process_separation_sync(video_id: str, title: Optional[str] = None, artist: 
             str(job_dir / "quad.m4a")
         ], check=True, capture_output=True)
 
-        jobs[video_id] = {"status": "ready", "progress": 100, "message": "Separación completada con éxito."}
+        jobs[video_id] = {"status": "ready", "progress": 100, "message": "Separacion completada con exito."}
 
     except Exception as e:
         jobs[video_id] = {"status": "error", "progress": 0, "message": str(e)}
@@ -133,7 +123,6 @@ def process_separation_sync(video_id: str, title: Optional[str] = None, artist: 
         if temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-# 1. FastAPI App
 fastapi_app = FastAPI(title="Trop AI Karaoke Server", version="1.0.0")
 
 fastapi_app.add_middleware(
@@ -146,12 +135,7 @@ fastapi_app.add_middleware(
 
 @fastapi_app.get("/api/health")
 def health():
-    try:
-        import torch
-        cuda_avail = torch.cuda.is_available()
-    except Exception:
-        cuda_avail = False
-
+    cuda_avail = torch.cuda.is_available()
     return {
         "status": "ok",
         "service": "Trop AI Karaoke Server",
@@ -170,7 +154,6 @@ def get_stems_status(video_id: str):
             "instrumental_url": f"/stems/{video_id}/instrumental.m4a",
             "vocals_url": f"/stems/{video_id}/vocals.m4a"
         }
-    
     if video_id in jobs:
         job = jobs[video_id]
         return {
@@ -178,8 +161,7 @@ def get_stems_status(video_id: str):
             "progress": job.get("progress", 0),
             "message": job.get("message", "")
         }
-
-    return {"status": "not_found", "message": "Pista no procesada aún"}
+    return {"status": "not_found", "message": "Pista no procesada aun"}
 
 @fastapi_app.post("/api/separate")
 async def separate(req: SeparateRequest, bg: BackgroundTasks):
@@ -199,7 +181,7 @@ async def separate(req: SeparateRequest, bg: BackgroundTasks):
     if video_id in jobs and jobs[video_id].get("status") == "processing":
         return jobs[video_id]
 
-    jobs[video_id] = {"status": "processing", "progress": 5, "message": "En cola para separación..."}
+    jobs[video_id] = {"status": "processing", "progress": 5, "message": "En cola para separacion..."}
     bg.add_task(process_separation_sync, video_id, req.title, req.artist)
     return jobs[video_id]
 
@@ -210,7 +192,6 @@ def serve_stem(video_id: str, filename: str):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
     return FileResponse(file_path, media_type="audio/mp4")
 
-# Gradio Web Interface
 def get_cached_count():
     try:
         return len([d for d in STEMS_DIR.iterdir() if d.is_dir() and (d / "quad.m4a").is_file()])
@@ -218,45 +199,40 @@ def get_cached_count():
         return 0
 
 def web_separate(video_id_or_url: str):
-    import re
     cleaned = video_id_or_url.strip()
     m = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", cleaned)
     video_id = m.group(1) if m else cleaned
     if not video_id:
-        return "Introduce un ID o enlace de YouTube válido.", None, None
-    
+        return "Introduce un ID o enlace de YouTube valido.", None, None
     process_separation_sync(video_id)
     if stems_exist(video_id):
         job_dir = get_job_dir(video_id)
         return (
-            f"✅ ¡Separación completada para {video_id}!",
+            f"Separacion completada para {video_id}!",
             str(job_dir / "instrumental.m4a"),
             str(job_dir / "vocals.m4a")
         )
     else:
         err = jobs.get(video_id, {}).get("message", "Error desconocido")
-        return f"❌ Error: {err}", None, None
+        return f"Error: {err}", None, None
 
 with gr.Blocks(title="Trop AI Karaoke Server") as demo:
-    gr.Markdown("# 🎤 Trop AI Karaoke Server (Online)")
+    gr.Markdown("# Trop AI Karaoke Server (Online)")
     gr.Markdown("Servidor de Inteligencia Artificial para separar la voz y los instrumentos en la app **Trop iOS**.")
-    
     with gr.Row():
-        status_box = gr.Markdown(f"**Estado:** 🟢 Online | **Pistas en caché:** {get_cached_count()}")
-    
+        gr.Markdown(f"**Estado:** Online | **Pistas en cache:** {get_cached_count()}")
     gr.Markdown("---")
-    gr.Markdown("### 📱 ¿Cómo conectarlo a Trop en tu iPhone?")
+    gr.Markdown("### Como conectarlo a Trop en tu iPhone:")
     gr.Markdown("""
     1. Abre **Trop** en tu iPhone.
-    2. Ve a **Settings → Player → Karaoke & Separación IA**.
-    3. En **URL Servidor IA**, pega la URL de este servidor (terminada en `.hf.space`).
+    2. Ve a **Settings -> Player -> Karaoke & Separacion IA**.
+    3. En **URL Servidor IA**, pega la URL de este Space (terminada en `.hf.space`).
     4. Activa **Separar con Servidor IA** y ajusta la barra de volumen de voz a tu gusto.
     """)
-    
     gr.Markdown("---")
-    gr.Markdown("### 🧪 Prueba rápida desde el navegador:")
+    gr.Markdown("### Prueba rapida desde el navegador:")
     with gr.Row():
-        url_input = gr.Textbox(label="ID o URL de YouTube", placeholder="Ej: dQw4w9WgXcQ o https://www.youtube.com/watch?v=...")
+        url_input = gr.Textbox(label="ID o URL de YouTube", placeholder="Ej: dQw4w9WgXcQ o enlace completo")
     with gr.Row():
         btn = gr.Button("Separar Audio", variant="primary")
     with gr.Row():
@@ -264,10 +240,8 @@ with gr.Blocks(title="Trop AI Karaoke Server") as demo:
     with gr.Row():
         out_inst = gr.Audio(label="Instrumental (Sin voz)")
         out_voc = gr.Audio(label="Voz Aislada (Acapella)")
-    
     btn.click(fn=web_separate, inputs=[url_input], outputs=[out_msg, out_inst, out_voc])
 
-# Mount Gradio onto FastAPI root
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
 
 if __name__ == "__main__":
