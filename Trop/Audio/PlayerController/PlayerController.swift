@@ -325,7 +325,7 @@ extension PlayerController {
     }
 
     private static func fmt(_ value: Double) -> String {
-        String(format: Locale(identifier: "en_US_POSIX"), "%.4f", value)
+        String(format: "%.4f", value)
     }
 }
 
