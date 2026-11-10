@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Dict, Optional
 import torch
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -123,75 +123,6 @@ def process_separation_sync(video_id: str, title: Optional[str] = None, artist: 
         if temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-fastapi_app = FastAPI(title="Trop AI Karaoke Server", version="1.0.0")
-
-fastapi_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@fastapi_app.get("/api/health")
-def health():
-    cuda_avail = torch.cuda.is_available()
-    return {
-        "status": "ok",
-        "service": "Trop AI Karaoke Server",
-        "cuda_available": cuda_avail,
-        "device": "cuda" if cuda_avail else "cpu",
-        "active_jobs": len(jobs)
-    }
-
-@fastapi_app.get("/api/stems/{video_id}")
-def get_stems_status(video_id: str):
-    if stems_exist(video_id):
-        return {
-            "status": "ready",
-            "progress": 100,
-            "quad_url": f"/stems/{video_id}/quad.m4a",
-            "instrumental_url": f"/stems/{video_id}/instrumental.m4a",
-            "vocals_url": f"/stems/{video_id}/vocals.m4a"
-        }
-    if video_id in jobs:
-        job = jobs[video_id]
-        return {
-            "status": job.get("status", "processing"),
-            "progress": job.get("progress", 0),
-            "message": job.get("message", "")
-        }
-    return {"status": "not_found", "message": "Pista no procesada aun"}
-
-@fastapi_app.post("/api/separate")
-async def separate(req: SeparateRequest, bg: BackgroundTasks):
-    video_id = req.video_id.strip()
-    if not video_id:
-        raise HTTPException(status_code=400, detail="video_id requerido")
-
-    if stems_exist(video_id):
-        return {
-            "status": "ready",
-            "progress": 100,
-            "quad_url": f"/stems/{video_id}/quad.m4a",
-            "instrumental_url": f"/stems/{video_id}/instrumental.m4a",
-            "vocals_url": f"/stems/{video_id}/vocals.m4a"
-        }
-
-    if video_id in jobs and jobs[video_id].get("status") == "processing":
-        return jobs[video_id]
-
-    jobs[video_id] = {"status": "processing", "progress": 5, "message": "En cola para separacion..."}
-    bg.add_task(process_separation_sync, video_id, req.title, req.artist)
-    return jobs[video_id]
-
-@fastapi_app.get("/stems/{video_id}/{filename}")
-def serve_stem(video_id: str, filename: str):
-    file_path = get_job_dir(video_id) / filename
-    if not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Archivo no encontrado")
-    return FileResponse(file_path, media_type="audio/mp4")
-
 def get_cached_count():
     try:
         return len([d for d in STEMS_DIR.iterdir() if d.is_dir() and (d / "quad.m4a").is_file()])
@@ -216,9 +147,10 @@ def web_separate(video_id_or_url: str):
         err = jobs.get(video_id, {}).get("message", "Error desconocido")
         return f"Error: {err}", None, None
 
+# Gradio Interface
 with gr.Blocks(title="Trop AI Karaoke Server") as demo:
     gr.Markdown("# Trop AI Karaoke Server (Online)")
-    gr.Markdown("Servidor de Inteligencia Artificial para separar la voz y los instrumentos en la app **Trop iOS**.")
+    gr.Markdown("Servidor de Inteligencia Artificial para separar voz e instrumentos en la app **Trop iOS**.")
     with gr.Row():
         gr.Markdown(f"**Estado:** Online | **Pistas en cache:** {get_cached_count()}")
     gr.Markdown("---")
@@ -242,8 +174,73 @@ with gr.Blocks(title="Trop AI Karaoke Server") as demo:
         out_voc = gr.Audio(label="Voz Aislada (Acapella)")
     btn.click(fn=web_separate, inputs=[url_input], outputs=[out_msg, out_inst, out_voc])
 
-app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+# Attach FastAPI endpoints directly to demo.app
+demo.app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@demo.app.get("/api/health")
+def health():
+    cuda_avail = torch.cuda.is_available()
+    return {
+        "status": "ok",
+        "service": "Trop AI Karaoke Server",
+        "cuda_available": cuda_avail,
+        "device": "cuda" if cuda_avail else "cpu",
+        "active_jobs": len(jobs)
+    }
+
+@demo.app.get("/api/stems/{video_id}")
+def get_stems_status(video_id: str):
+    if stems_exist(video_id):
+        return {
+            "status": "ready",
+            "progress": 100,
+            "quad_url": f"/stems/{video_id}/quad.m4a",
+            "instrumental_url": f"/stems/{video_id}/instrumental.m4a",
+            "vocals_url": f"/stems/{video_id}/vocals.m4a"
+        }
+    if video_id in jobs:
+        job = jobs[video_id]
+        return {
+            "status": job.get("status", "processing"),
+            "progress": job.get("progress", 0),
+            "message": job.get("message", "")
+        }
+    return {"status": "not_found", "message": "Pista no procesada aun"}
+
+@demo.app.post("/api/separate")
+async def separate(req: SeparateRequest, bg: BackgroundTasks):
+    video_id = req.video_id.strip()
+    if not video_id:
+        raise HTTPException(status_code=400, detail="video_id requerido")
+
+    if stems_exist(video_id):
+        return {
+            "status": "ready",
+            "progress": 100,
+            "quad_url": f"/stems/{video_id}/quad.m4a",
+            "instrumental_url": f"/stems/{video_id}/instrumental.m4a",
+            "vocals_url": f"/stems/{video_id}/vocals.m4a"
+        }
+
+    if video_id in jobs and jobs[video_id].get("status") == "processing":
+        return jobs[video_id]
+
+    jobs[video_id] = {"status": "processing", "progress": 5, "message": "En cola para separacion..."}
+    bg.add_task(process_separation_sync, video_id, req.title, req.artist)
+    return jobs[video_id]
+
+@demo.app.get("/stems/{video_id}/{filename}")
+def serve_stem(video_id: str, filename: str):
+    file_path = get_job_dir(video_id) / filename
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return FileResponse(file_path, media_type="audio/mp4")
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    demo.launch()
