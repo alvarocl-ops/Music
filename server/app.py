@@ -1,5 +1,13 @@
 import os
 import sys
+
+try:
+    import spaces
+    gpu_decorator = spaces.GPU(duration=120)
+except Exception:
+    def gpu_decorator(func):
+        return func
+
 import shutil
 import asyncio
 import subprocess
@@ -129,6 +137,7 @@ def get_cached_count():
     except Exception:
         return 0
 
+@gpu_decorator
 def web_separate(video_id_or_url: str):
     cleaned = video_id_or_url.strip()
     m = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", cleaned)
